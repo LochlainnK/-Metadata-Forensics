@@ -1,0 +1,25 @@
+# Never commit the Game Master bearer token or any auth config.
+auth.conf
+*.auth.conf
+.hctf-token
+secrets/
+
+# Downloaded challenge artifacts and solver work dirs are untrusted data and
+# are tied to a personal attempt — keep them out of the repo.
+artifacts/
+work/
+solve-*/
+*.zip
+*.msi
+*.exe
+*.dll
+*.jpg
+*.png
+*.pdf
+*.answers.json
+
+# Python / editor noise
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
