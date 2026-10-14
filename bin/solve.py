@@ -433,24 +433,34 @@ def main():
     ap.add_argument("--workdir", default=None, help="base work dir (a subdir per challenge)")
     ap.add_argument("--answers", default=None, help="write answers JSON here (single challenge)")
     ap.add_argument("--keep", action="store_true", help="keep work dirs")
+    ap.add_argument("--require-complete", action="store_true",
+                    help="exit non-zero (3) unless every question was answered; "
+                         "used to gate timed modes behind a clean single_solve")
     a = ap.parse_args()
 
     chs = a.challenge
     if len(chs) == 1:
-        solve_one(chs[0], a)
-        return
-    # Solve multiple challenges in parallel so each timed attempt runs on its
-    # own clock and the whole set finishes in about the slowest one's time.
-    t0 = time.time()
-    with ThreadPoolExecutor(max_workers=min(len(chs), 8)) as ex:
-        summaries = list(ex.map(lambda c: solve_one(c, a), chs))
-    print("\n================= summary =================")
-    for s in sorted(summaries, key=lambda x: x["challenge"]):
-        rslt = f" result={s['result']}" if s["result"] else ""
-        rev = f" review={s['review']}" if s["review"] else ""
-        print(f"  {s['challenge']:52s} {s['answered']}/{s['total']}"
-              f" {s['elapsed']:.1f}s{rslt}{rev}")
-    print(f"  wall time for {len(chs)} challenges: {time.time()-t0:.1f}s")
+        summaries = [solve_one(chs[0], a)]
+    else:
+        # Solve multiple challenges in parallel so each timed attempt runs on
+        # its own clock and the whole set finishes in about the slowest's time.
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=min(len(chs), 8)) as ex:
+            summaries = list(ex.map(lambda c: solve_one(c, a), chs))
+        print("\n================= summary =================")
+        for s in sorted(summaries, key=lambda x: x["challenge"]):
+            rslt = f" result={s['result']}" if s["result"] else ""
+            rev = f" review={s['review']}" if s["review"] else ""
+            print(f"  {s['challenge']:52s} {s['answered']}/{s['total']}"
+                  f" {s['elapsed']:.1f}s{rslt}{rev}")
+        print(f"  wall time for {len(chs)} challenges: {time.time()-t0:.1f}s")
+
+    # exit-code contract: 3 means at least one challenge was not fully answered
+    incomplete = [s for s in summaries if s["answered"] < s["total"]]
+    if a.require_complete and incomplete:
+        sys.stderr.write(f"require-complete: {len(incomplete)} challenge(s) "
+                         f"not fully answered\n")
+        sys.exit(3)
 
 
 if __name__ == "__main__":

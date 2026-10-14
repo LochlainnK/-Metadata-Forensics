@@ -10,6 +10,7 @@ mastery challenges (days 1–13): 169/169 auto-answered, 0 unresolved.**
 
 ```
 bin/
+  run-day.sh    per-day flow: single_solve (gate) -> time_trial -> mastery
   gm.sh         Game Master API client (list / start / status / artifact / submit)
   fmtprobe.py   structural extractor — reads bytes, emits grader-ready field values
   solve.py      auto-solver — maps every question to (file, field) and submits
@@ -19,6 +20,27 @@ docs/
   CHALLENGES.md        day-by-day map of format → field → theme
 setup.sh        install the toolchain + store the token privately
 ```
+
+## Recommended per-day flow
+
+```bash
+bin/run-day.sh 14              # by day number (looked up live)
+bin/run-day.sh 14 --timed      # opt the timed modes into Hall-of-Fame ranking
+bin/run-day.sh 14 --dry        # compute only, submit nothing
+```
+
+`run-day.sh` runs a day in the order that minimises wasted timed attempts:
+
+1. **single_solve** — the untimed, static artifact. This is the **gate**: the
+   solver must answer it completely. If a brand-new field shows up that it
+   can't resolve, the run **stops here** (before any clock starts) so you can
+   teach `fmtprobe.py` the field on the free artifact. `--force` overrides.
+2. **time_trial** — the same knowledge, now against the server countdown.
+3. **mastery** — the bundle, whose many files are extracted **in parallel**
+   inside `solve.py` and submitted in one batch.
+
+Under the hood each step is just `solve.py`, so you can also run any single mode
+directly (below) — e.g. to re-attempt one mode or to fan several out at once.
 
 ## The loop
 
