@@ -72,12 +72,16 @@ case "$cmd" in
         }'
     ;;
 
-  start|retry)
+  start|retry|practice)
+    # start   -> {challenge}                 (begin/reconnect)
+    # retry   -> {op:retry,challenge}         (spend a fresh variant)
+    # practice-> {op:practice,challenge}      (untimed continuation once variants
+    #                                          are exhausted; completes the mode)
     ch="${1:?challenge id required}"; shift || true
     timed=false
     for a in "$@"; do [[ "$a" == "--timed" ]] && timed=true; done
     body=$(jq -nc --arg ch "$ch" --argjson t "$timed" --arg op "$cmd" \
-      'if $op=="retry" then {op:"retry",challenge:$ch} else {challenge:$ch} end
+      'if $op=="start" then {challenge:$ch} else {op:$op,challenge:$ch} end
        | if $t then . + {run_for_time:true} else . end')
     _post "" "$body"
     ;;

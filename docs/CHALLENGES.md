@@ -27,6 +27,7 @@ column is the number of questions in the mastery bundle. Every one of these
 | 11 | What's My Name Again? | filenames randomized; PE version resource remembers | `pe.version_original_filename` | 2 |
 | 12 | Managed Expectations | .NET assemblies: rebuilds vs. renames | `dotnet.mvid_guid` | 2 |
 | 13 | Product Placement | MSI installers: revisions vs. collisions | `msi.product_code_guid` | 2 |
+| 14 | The Shortcut Home | Windows `.lnk` shortcuts: read where each points | `lnk.target_path_windows` | 2 |
 
 ## Recurring artifact shape
 
@@ -39,6 +40,18 @@ column is the number of questions in the mastery bundle. Every one of these
 - The `evidence-note.txt` is the target of the hash/size/first16/BOM and
   filename questions; `evidence-drop-*.zip` is the target of the `zip.*`
   questions.
+
+## Timed-mode mechanics (learned live on day 14)
+
+- `time_trial`/`mastery` on legacy routes (`run_for_time_supported=false`) start
+  the countdown on the first `start` — a tight window (~30s on day 14). The
+  parallel solver does start→download→extract→submit in ~2–3s, well inside it.
+- For timed modes, `status` lists **no** artifacts; the bundle comes from
+  `op=artifact` (solve.py's fallback), and it may be a zip with **no `.zip`
+  name** — extraction keys off the `PK\x03\x04` magic, not the extension.
+- When a timed attempt lapses or variants are exhausted, the server replies
+  `expired`. `solve.py` then issues `op=practice` (untimed continuation on the
+  same artifact) and resubmits automatically, so the mode still completes.
 
 ## Theme notes (what the "trick" actually is)
 

@@ -77,12 +77,12 @@ def extract_tree(artifacts_dir, index, extracted_bytes):
         depth += 1
         for root, _dirs, files in os.walk(artifacts_dir):
             for fn in files:
-                if not fn.lower().endswith(".zip"):
-                    continue
                 zpath = os.path.join(root, fn)
                 dest = zpath + ".d"
                 if os.path.isdir(dest):
                     continue  # already extracted
+                # detect zips by magic, not extension: timed modes deliver the
+                # bundle via op=artifact with no .zip name.
                 if not is_zip(zpath):
                     continue
                 os.makedirs(dest, exist_ok=True)
@@ -407,6 +407,14 @@ def solve_one(challenge, a):
         with open(af, "w") as fh:
             json.dump(answers, fh, ensure_ascii=False)
         res = gm_json("submit", challenge, "--json", af)
+        # If a timed attempt lapsed (we were too slow, or no variants remain),
+        # the server replies "expired". Fall back to untimed practice — which
+        # continues on the same artifact — and resubmit so the mode still
+        # completes autonomously.
+        if res.get("result") == "expired":
+            sys.stderr.write(f"{pfx} attempt expired; continuing in practice\n")
+            gm("practice", challenge)
+            res = gm_json("submit", challenge, "--json", af)
         result = res.get("result")
         print(f"\n=== {challenge} submit ===")
         print(json.dumps({k: res.get(k) for k in

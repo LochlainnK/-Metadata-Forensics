@@ -215,6 +215,42 @@ def msi_product_code_guid(path):
     return None
 
 
+# --------------------------------------------------------------------- lnk ----
+def lnk_target_path_windows(path):
+    """Target path of a Windows .lnk shell link.
+
+    Canonical source is LinkInfo: LocalBasePath + CommonPathSuffix. Falls back
+    to the relative-path / environment-variable target blocks when LinkInfo has
+    no local path (e.g. a network or environment-based target).
+    """
+    try:
+        import LnkParse3
+    except ImportError:
+        return None
+    try:
+        with open(path, "rb") as f:
+            d = LnkParse3.lnk_file(f).get_json()
+    except Exception:
+        return None
+    li = d.get("link_info") or {}
+    base = li.get("local_base_path") or li.get("local_base_path_unicode") or ""
+    suffix = li.get("common_path_suffix") or li.get("common_path_suffix_unicode") or ""
+    full = (base + suffix).strip()
+    if full:
+        return full
+    # network share target
+    net = (li.get("common_network_relative_link") or {}).get("net_name")
+    if net:
+        return (net + suffix).strip()
+    # fallbacks held under the extra data blocks
+    data = d.get("data") or {}
+    for k, v in data.items():
+        if isinstance(v, str) and v.strip() and \
+           ("environment" in k.lower() or "relative_path" in k.lower()):
+            return v.strip()
+    return "none"
+
+
 # -------------------------------------------------------------- dispatch ----
 BYTE_FIELDS = {
     "size": f_size, "md5": f_md5, "sha1": f_sha1, "sha256": f_sha256,
@@ -232,6 +268,7 @@ PATH_FIELDS = {
     "pe.version_original_filename": pe_version_original_filename,
     "dotnet.mvid_guid": dotnet_mvid_guid,
     "msi.product_code_guid": msi_product_code_guid,
+    "lnk.target_path_windows": lnk_target_path_windows,
 }
 # fields that are only meaningful for a matching magic; used for auto mode
 MAGIC_FIELDS = {
@@ -314,6 +351,10 @@ def auto(path):
     if b[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":  # OLE2 (MSI)
         pc = msi_product_code_guid(path)
         if pc: res["msi.product_code_guid"] = pc
+    if b[:4] == b"\x4c\x00\x00\x00" and b[4:20] == \
+            b"\x01\x14\x02\x00\x00\x00\x00\x00\xc0\x00\x00\x00\x00\x00\x00\x46":  # LNK
+        tp = lnk_target_path_windows(path)
+        if tp: res["lnk.target_path_windows"] = tp
     return res
 
 

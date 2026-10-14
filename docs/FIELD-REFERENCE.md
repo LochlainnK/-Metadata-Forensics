@@ -45,6 +45,7 @@ Reading the structure is the point.
 | `pe.version_original_filename` | the `OriginalFilename` string | `exiftool -OriginalFileName` (reads `VS_VERSION_INFO`) |
 | `dotnet.mvid_guid` | canonical `8-4-4-4-12` lowercase | `dnfile` → Module table `Mvid` → `uuid.UUID(bytes_le=…)` |
 | `msi.product_code_guid` | `{8-4-4-4-12}` (as stored) | `msiinfo export <f> Property` → `ProductCode` row |
+| `lnk.target_path_windows` | the Windows target path, e.g. `C:\Windows\System32\cmd.exe` | `LnkParse3` → LinkInfo `local_base_path` + `common_path_suffix`; falls back to network share / env-var / relative-path blocks (day 14) |
 
 ### GUID format notes
 

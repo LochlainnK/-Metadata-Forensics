@@ -24,7 +24,7 @@ install_deps() {
     msitools \
     unzip poppler-utils imagemagick jq curl
   echo "== installing python deps =="
-  python3 -m pip install -q --user dnfile || python3 -m pip install -q dnfile
+  python3 -m pip install -q --user dnfile LnkParse3 || python3 -m pip install -q dnfile LnkParse3
   echo "== versions =="
   exiftool -ver; msiinfo --version | head -1; python3 -c 'import dnfile;print("dnfile",dnfile.__version__)'
 }
