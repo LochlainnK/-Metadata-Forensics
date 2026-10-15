@@ -30,8 +30,9 @@ Digests are graded case-insensitively; everything else is `trim`.
 | `text.utf8_bom_present` | `true`/`false` | leading bytes equal `EF BB BF` |
 | `zip.eocd_total_entries` | integer | "total central-directory records" u16 @ EOCD+10 (ZIP64 EOCD fallback when saturated) |
 | `zip.central_directory_member_names` | compact JSON array | walk the central-directory headers (`PK\x01\x02`) in order; names only |
-| `pe.coff_machine_u16_hex` | `0xNNNN` (u16, 4 digits) | COFF `Machine` u16 @ `e_lfanew`+4 |
-| `pe.address_of_entry_point_rva_hex` | `0x…` (minimal) | Optional-header `AddressOfEntryPoint` u32 @ `e_lfanew`+24+16 |
+| `pe.coff_machine_u16_hex` | `0xNNNN` (u16, 4 hex digits) | COFF `Machine` u16 @ `e_lfanew`+4 |
+| `pe.address_of_entry_point_rva_hex` | `0xNNNNNNNN` (u32, 8 hex digits) | Optional-header `AddressOfEntryPoint` u32 @ `e_lfanew`+24+16 |
+| `ooxml.external_relationship_targets` | compact JSON array, **sorted** | each `*.rels` part of the OOXML zip; the `Target` of every `TargetMode="External"` relationship, lexicographically sorted |
 
 Why parse bytes instead of trusting a tool? The whole lane is about
 *structure vs. presentation* — a renamed `.png` that is really a JPEG, a "clean"
@@ -53,9 +54,18 @@ Reading the structure is the point.
   first three fields little-endian, so `uuid.UUID(bytes_le=…)` yields the
   canonical lowercase hyphenated form the grader's `pattern` expects.
 - **MSI ProductCode**: `msiinfo` returns it wrapped in braces and uppercased
-  (`{DD1A80D5-…}`). The `pattern` grader keys on the `8-4-4-4-12` hex with
-  hyphens; braces/case are the one thing to re-check on a live, unsolved
-  challenge — submit, and if it bounces, try the braceless lowercase form.
+  (`{DD1A80D5-…}`), and that is exactly what the grader wants — submit it
+  **as stored** (braced + uppercase), *not* braceless/lowercased. Verified live
+  on day 15; note this is the opposite of `dotnet.mvid_guid`, which is bare
+  lowercase despite the two questions sharing an identical `answer_format`
+  string. The format text is not authoritative here; the stored value is.
+
+### PE hex fields — pad to the type width
+
+Both PE hex fields are zero-padded to the full width of their integer type,
+not minimised: `pe.coff_machine_u16_hex` → 4 digits (`0x014c`),
+`pe.address_of_entry_point_rva_hex` → 8 digits (`0x00065bd0`). A minimal
+`0x65bd0` is rejected. (Verified live on day 15.)
 
 ## Unknown fields — the exiftool fallback (generalization)
 

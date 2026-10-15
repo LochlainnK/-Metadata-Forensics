@@ -31,7 +31,8 @@ Usage:
 
 Designed to be run with `python3 -I` on untrusted downloaded bytes.
 """
-import sys, os, re, struct, hashlib, json, subprocess, argparse, uuid
+import sys, os, re, struct, hashlib, json, subprocess, argparse, uuid, io, zipfile
+import xml.etree.ElementTree as ET
 
 
 # ---------------------------------------------------------------- generic ----
@@ -167,7 +168,9 @@ def pe_address_of_entry_point_rva_hex(b):
         return None
     opt = o + 24  # after 4-byte sig + 20-byte COFF header
     aoep = struct.unpack("<I", b[opt+16:opt+20])[0]
-    return f"0x{aoep:x}"
+    # grader wants the u32 RVA zero-padded to its full 8 hex digits
+    # (e.g. 0x00065bd0), mirroring the u16 machine's 4-digit padding.
+    return f"0x{aoep:08x}"
 
 def pe_version_original_filename(path):
     # VS_VERSION_INFO parsing is fiddly; exiftool reads it reliably.
@@ -211,6 +214,9 @@ def msi_product_code_guid(path):
     for line in out.splitlines():
         parts = line.split("\t")
         if len(parts) >= 2 and parts[0] == "ProductCode":
+            # grader expects the ProductCode exactly as the MSI stores it:
+            # braced + uppercase, e.g. {DD1A80D5-...} (verified live on day 15;
+            # unlike dotnet.mvid_guid, which is bare lowercase).
             return parts[1].strip()
     return None
 
@@ -251,6 +257,52 @@ def lnk_target_path_windows(path):
     return "none"
 
 
+# ------------------------------------------------------------------ ooxml ----
+# OOXML (.docx/.xlsx/.pptx) is a ZIP of parts. Relationships live in *.rels
+# parts (package `_rels/.rels` and per-part `word/_rels/<part>.rels`, etc.).
+# A relationship whose `TargetMode="External"` points outside the package — a
+# hyperlink, remote template, linked image, OLE object or remote reference —
+# which is exactly the "reaching somewhere it should not" the challenge asks to
+# separate from the internal (relative, package-local) references.
+_REL_TAG = "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
+
+def ooxml_external_relationship_targets(b):
+    """Compact JSON array of every external relationship Target, sorted.
+
+    Collects the `Target` of every `TargetMode="External"` relationship from
+    all `*.rels` parts of the package, then returns them as a compact JSON
+    array in lexicographic (sorted) order — the grader's canonical, Id/order-
+    independent form (verified against the day-15 single_solve). Only external
+    relationships are included; internal/relative references (officeDocument,
+    styles, core-properties, embedded media, ...) are excluded. A document with
+    no external relationships yields `[]`.
+    """
+    if b[:4] != b"PK\x03\x04":
+        return None
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(b))
+    except Exception:
+        return None
+    rels_parts = [n for n in zf.namelist()
+                  if n.endswith(".rels") and "/_rels/" in ("/" + n)]
+    if not rels_parts:
+        return None  # not an OOXML package
+    targets = []
+    for part in rels_parts:
+        try:
+            root = ET.fromstring(zf.read(part))
+        except Exception:
+            continue
+        for rel in root:
+            if rel.tag != _REL_TAG and rel.tag.split("}")[-1] != "Relationship":
+                continue
+            if (rel.get("TargetMode") or "").lower() == "external":
+                tgt = rel.get("Target")
+                if tgt is not None:
+                    targets.append(tgt)
+    return json.dumps(sorted(targets), ensure_ascii=False, separators=(",", ":"))
+
+
 # -------------------------------------------------------------- dispatch ----
 BYTE_FIELDS = {
     "size": f_size, "md5": f_md5, "sha1": f_sha1, "sha256": f_sha256,
@@ -263,6 +315,7 @@ BYTE_FIELDS = {
     "zip.central_directory_member_names": zip_central_directory_member_names,
     "pe.coff_machine_u16_hex": pe_coff_machine_u16_hex,
     "pe.address_of_entry_point_rva_hex": pe_address_of_entry_point_rva_hex,
+    "ooxml.external_relationship_targets": ooxml_external_relationship_targets,
 }
 PATH_FIELDS = {
     "pe.version_original_filename": pe_version_original_filename,
@@ -279,6 +332,7 @@ MAGIC_FIELDS = {
     "zip.central_directory_member_names": lambda b: b.rfind(b"PK\x05\x06") >= 0,
     "pe.coff_machine_u16_hex":    lambda b: b[:2] == b"MZ",
     "pe.address_of_entry_point_rva_hex": lambda b: b[:2] == b"MZ",
+    "ooxml.external_relationship_targets": lambda b: b[:4] == b"PK\x03\x04" and b.find(b"[Content_Types].xml") >= 0,
 }
 
 

@@ -5,8 +5,10 @@ Huntress CTF 2026. It talks to the Game Master API, downloads the assigned
 artifacts, reads their *real bytes*, and answers each question in exactly the
 format the grader expects — fast enough for Time Trial and Mastery modes.
 
-Validated end-to-end against **all 169 questions across the 13 released
-mastery challenges (days 1–13): 169/169 auto-answered, 0 unresolved.**
+Validated end-to-end across the released challenges, most recently **day 15
+"A Word to the Wise": single_solve + time_trial + the 100-question mastery
+bundle all solved** (OOXML external relationships, plus a cumulative review of
+every prior field type).
 
 ```
 bin/

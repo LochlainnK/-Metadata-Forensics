@@ -28,6 +28,7 @@ column is the number of questions in the mastery bundle. Every one of these
 | 12 | Managed Expectations | .NET assemblies: rebuilds vs. renames | `dotnet.mvid_guid` | 2 |
 | 13 | Product Placement | MSI installers: revisions vs. collisions | `msi.product_code_guid` | 2 |
 | 14 | The Shortcut Home | Windows `.lnk` shortcuts: read where each points | `lnk.target_path_windows` | 2 |
+| 15 | A Word to the Wise | OOXML (`.docx`) relationships: external vs internal | `ooxml.external_relationship_targets` (+ cumulative review of all prior fields, a per-set SHA-256 **synthesis** ordering, and `roster.csv` / note-vs-copy filename questions) | 100 |
 
 ## Recurring artifact shape
 
@@ -53,6 +54,34 @@ column is the number of questions in the mastery bundle. Every one of these
   `expired`. `solve.py` then issues `op=practice` (untimed continuation on the
   same artifact) and resubmits automatically, so the mode still completes.
 
+## Timed vs. regular, and partial scoring (learned live on day 15)
+
+The API evolved since day 14 — current behaviour:
+
+- **`time_trial`/`mastery` are untimed "regular" scored challenges by default**
+  (`deadline: null`). Only `run_for_time:true` (solve.py's `--timed`) requests
+  a timed Hall-of-Fame attempt with a countdown. Solve them untimed unless you
+  specifically want a ranked time — there is no clock to race.
+- **Untimed submits give partial, cumulative feedback**: a submission whose
+  answers are all correct returns `result:"accepted"` with `accepted_ids` and a
+  decreasing `remaining`; a submission containing any wrong/missing answer
+  returns `result:"incorrect"` and records nothing from that batch. So to
+  isolate a wrong field, submit answers **one at a time** — the ids that come
+  back `incorrect` are the culprits. (Timed attempts grade all-or-nothing.)
+- **`start` always reconnects** to the current attempt; **`retry`** advances to
+  a *distinct* variant (regular or timed per `run_for_time`). `solve.py --retry`
+  does this in-process. Each `retry` is a fresh variant whose files — and whose
+  exact question mix — differ, so nail output formats rather than iterating.
+- **`mastery` is prerequisite-gated**: it returns `error:"prerequisite_required"`
+  until that day's `single_solve`/`time_trial` are solved. Run the modes in
+  order (`run-day.sh` already does).
+- The mastery bundle holds `evidence-01.zip` … `-05.zip` (one *set* each, 20 Qs).
+  Set-scoped questions (the SHA-256 synthesis ordering, note-vs-copy filenames)
+  must be resolved **within their own set's zip**, or every set inherits set-1's
+  answer.
+
+## Theme notes (what the "trick" actually is)
+
 ## Theme notes (what the "trick" actually is)
 
 - **Day 2 / Day 4 / Day 5 / Day 6** — the *presentation* (filename, extension,
@@ -67,3 +96,11 @@ column is the number of questions in the mastery bundle. Every one of these
   `Mvid` GUID is unique per build; a rename keeps the Mvid, a rebuild changes it.
 - **Day 13 collision** — two installers copied/repackaged share the same
   `ProductCode` GUID — that shared code is the collision.
+- **Day 15 "A Word to the Wise"** — a `.docx` is a zip of OOXML parts; its
+  `*.rels` relationships split into internal (relative, package-local) and
+  external (`TargetMode="External"`). The answer is the sorted list of external
+  `Target`s — the document "reaching somewhere it should not". The mastery
+  bundle layers a cumulative review of every prior field across five sets, a
+  per-set SHA-256 synthesis (filenames ordered by ascending digest), and
+  note-vs-copy filename questions (`evidence-note.txt` is the original "first
+  note"; `evidence-note-copy.txt` is the renamed copy with identical bytes).
