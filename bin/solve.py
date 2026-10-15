@@ -149,11 +149,22 @@ def parse_field(question):
     m = DETERMINE.search(q)
     if m:
         return m.group(1), None
+    # synthesis: "...JSON array of their filenames in ascending digest order..."
+    # (self-describing; carries its own "Files: [...]" list). Must be caught
+    # before the generic SHA-256 matcher, since it mentions SHA-256.
+    if re.search(r"ascending digest order", q, re.I):
+        # read the file list from the RAW question: the [...] tag-stripper above
+        # would otherwise eat the "Files: [...]" JSON array.
+        return None, ("synth-sha256-order", parse_file_list(question))
     # filename-reasoning questions before the generic hash matchers
     if re.search(r"filename of the first evidence note", q, re.I):
         return None, "first-note"
     if re.search(r"filename of the renamed evidence-note copy", q, re.I):
         return None, "renamed-copy"
+    # "exact filename of the <role>" (e.g. "the roster") -> resolve by name
+    mn = re.search(r"filename of the ([a-z0-9][a-z0-9 _-]*?)\s*[?.]", q, re.I)
+    if mn:
+        return None, ("named-file", mn.group(1).strip())
     if re.search(r"exact filename", q, re.I):
         return None, "filename-other"
     # generic hash / size / first-bytes
@@ -161,6 +172,18 @@ def parse_field(question):
         if rx.search(q):
             return name, None
     return None, "unknown"
+
+
+def parse_file_list(question):
+    """Extract the explicit 'Files: ["a","b",...]' list from a synthesis Q."""
+    m = re.search(r"Files?:\s*(\[.*\])", question, re.I | re.S)
+    if not m:
+        return []
+    try:
+        vals = json.loads(m.group(1))
+        return [str(v) for v in vals] if isinstance(vals, list) else []
+    except Exception:
+        return []
 
 
 ART_RX = re.compile(r"^(?:delivery\s+(?P<deliv>\d+):\s*)?(?P<zip>[^->]+?\.zip)\s*(?:->\s*(?P<member>.+))?$", re.I)
@@ -209,36 +232,93 @@ def _is_note(name):
 
 
 def resolve_filename(kind, zip_name, sibling_members, artifacts_dir):
-    """Resolve a filename-reasoning question deterministically.
+    """Resolve a filename-reasoning question deterministically, from the set's
+    own archive.
 
-    Primary signal: sibling questions in the same set reference the exact
-    member via their '<zip> -> <member>' artifact, so the note member named
-    there is the answer. Fallback: the zip's direct members in
-    central-directory order.
+    A set holds the original note plus a renamed copy with identical content.
+    The *original* ("first evidence note") is the member literally named
+    `evidence-note.txt` (else the shortest/lexicographically-first note). The
+    *renamed copy* is the note that shares the original's bytes but has a
+    different name. Reading the set's own zip members keeps sets from bleeding
+    into each other (sibling-member text, which references both notes, is only
+    a last resort).
     """
-    # 1. sibling-derived (deterministic)
-    sib_notes = [m for m in sibling_members if _is_note(m)]
-    if len(set(sib_notes)) == 1:
-        return os.path.basename(sib_notes[0]), ""        # confident
-    if sib_notes:
-        return os.path.basename(sib_notes[0]), "review(multiple-notes)"
-
-    # 2. fall back to reading the archive's direct members
     zpath = find_file(artifacts_dir, os.path.basename(zip_name))
-    if not zpath:
-        return None, "review(zip-not-found)"
-    members = zip_members_in_order(zpath)
-    notes = [(n, d) for n, d in members if _is_note(n)]
+    members = zip_members_in_order(zpath) if zpath else []
+    notes = [(os.path.basename(n), d) for n, d in members if _is_note(n)]
+    if not notes:
+        sib = [m for m in sibling_members if _is_note(m)]
+        if sib:
+            return os.path.basename(sib[0]), "review(no-zip-members)"
+        return None, "review(no-note)"
+
+    names = [n for n, _ in notes]
+    def canonical():
+        for n in names:
+            if n.lower() == "evidence-note.txt":
+                return n
+        return sorted(names, key=lambda s: (len(s), s))[0]
+    orig = canonical()
+
     if kind == "renamed-copy":
-        by_hash = {}
-        for n, d in members:
-            by_hash.setdefault(hashlib.sha256(d).hexdigest(), []).append(n)
-        dupes = [v for v in by_hash.values() if len(v) > 1]
-        if dupes:
-            return os.path.basename(dupes[0][-1]), "review"
-    if notes:
-        return os.path.basename(notes[0][0]), "review"
-    return None, "review(no-note)"
+        oh = next((hashlib.sha256(d).hexdigest() for n, d in notes if n == orig), None)
+        copies = [n for n, d in notes
+                  if n != orig and hashlib.sha256(d).hexdigest() == oh]
+        if copies:
+            return sorted(copies, key=lambda s: (len(s), s))[0], ""
+        others = [n for n in names if n != orig]
+        if others:
+            return sorted(others, key=lambda s: (len(s), s))[0], "review(copy-no-dup)"
+        return orig, "review(single-note)"
+    # first-note / filename-other -> the original
+    return orig, ""
+
+
+def resolve_named_file(descriptor, artifacts_dir):
+    """Resolve 'the <descriptor>' (e.g. 'roster') to a concrete filename.
+
+    The challenge names a file by its role rather than its member path; match
+    it by the descriptor's key word against filenames in the artifact tree,
+    preferring an exact stem match (roster -> roster.csv).
+    """
+    key = descriptor.strip().lower().split()[-1] if descriptor.strip() else ""
+    if not key:
+        return None, "review(empty-descriptor)"
+    exact, fuzzy = [], []
+    for dd, _s, ff in os.walk(artifacts_dir):
+        for fn in ff:
+            stem = os.path.splitext(fn)[0].lower()
+            if stem == key:
+                exact.append(fn)
+            elif key in fn.lower():
+                fuzzy.append(fn)
+    if len(set(exact)) == 1:
+        return exact[0], ""
+    if exact:
+        return sorted(exact)[0], "review(multiple-exact)"
+    if len(set(fuzzy)) == 1:
+        return fuzzy[0], ""
+    if fuzzy:
+        return sorted(fuzzy)[0], "review(named-file-fuzzy)"
+    return None, f"review(no-named-file:{descriptor})"
+
+
+def synth_sha256_order(files, root):
+    """Compact JSON array of the given filenames in ascending full-file SHA-256.
+
+    `root` is the set's own extracted dir so that, in a multi-set mastery
+    bundle, each set hashes its *own* files (a tree-wide search would hash
+    whichever set happened to come first, giving every set set-1's order).
+    """
+    pairs = []
+    for f in files:
+        p = find_file(root, os.path.basename(f))
+        if not p:
+            return None, f"SYNTH-MISSING({f})"
+        with open(p, "rb") as fh:
+            pairs.append((hashlib.sha256(fh.read()).hexdigest(), f))
+    order = [f for _h, f in sorted(pairs)]  # by digest, then filename
+    return json.dumps(order, ensure_ascii=False, separators=(",", ":")), ""
 
 
 # ---------------------------------------------------------------- solve one ----
@@ -256,11 +336,14 @@ def solve_one(challenge, a):
         shutil.rmtree(workdir)
     os.makedirs(artifacts_dir, exist_ok=True)
 
-    # 1. start / reconnect  (the countdown begins here for timed modes)
+    # 1. start / reconnect  (the countdown begins here for timed modes).
+    #    --retry spends a fresh variant instead of reconnecting to a (possibly
+    #    expired) attempt; doing it in-process keeps start->submit tight.
     t_start = time.time()
-    start = ["start", challenge] + (["--timed"] if a.timed else [])
+    op = "retry" if a.retry else "start"
+    start = [op, challenge] + (["--timed"] if a.timed else [])
     s = gm_json(*start)
-    sys.stderr.write(f"{pfx} start: {s.get('result','?')}  {s.get('name','')}\n")
+    sys.stderr.write(f"{pfx} {op}: {s.get('result', s.get('error','?'))}  {s.get('name','')}\n")
 
     # 2. status -> questions + artifacts
     st = gm_json("status", challenge)
@@ -317,9 +400,15 @@ def solve_one(challenge, a):
         qid = q.get("id")
         field, special = parse_field(q.get("question", ""))
         zip_name, member, delivery = parse_artifact(q.get("artifact", ""))
-        label = field or special or "?"
+        kindname = special[0] if isinstance(special, tuple) else special
+        label = field or kindname or "?"
         tgt = member or zip_name
-        if special in ("first-note", "renamed-copy", "filename-other"):
+        if isinstance(special, tuple) and special[0] == "synth-sha256-order":
+            set_root = index.get(zip_name) or artifacts_dir
+            jobs.append((idx, qid, label, tgt, "synth", (special[1], set_root)))
+        elif isinstance(special, tuple) and special[0] == "named-file":
+            jobs.append((idx, qid, label, tgt, "named-file", special[1]))
+        elif special in ("first-note", "renamed-copy", "filename-other"):
             sibs = group_members.get(group_key(q, zip_name), [])
             jobs.append((idx, qid, label, tgt, "filename",
                          (special, zip_name, sibs)))
@@ -350,6 +439,11 @@ def solve_one(challenge, a):
             if kind == "filename":
                 special, zip_name, sibs = payload
                 val, note = resolve_filename(special, zip_name, sibs, artifacts_dir)
+            elif kind == "named-file":
+                val, note = resolve_named_file(payload, artifacts_dir)
+            elif kind == "synth":
+                files, set_root = payload
+                val, note = synth_sha256_order(files, set_root)
             elif kind == "unmapped":
                 note = "UNMAPPED-QUESTION"
             elif kind == "notfound":
@@ -438,6 +532,8 @@ def main():
                     help="challenge id(s); several are solved concurrently")
     ap.add_argument("--submit", action="store_true", help="submit computed answers")
     ap.add_argument("--timed", action="store_true", help="opt into a timed attempt")
+    ap.add_argument("--retry", action="store_true",
+                    help="spend a fresh variant (op=retry) instead of reconnecting")
     ap.add_argument("--workdir", default=None, help="base work dir (a subdir per challenge)")
     ap.add_argument("--answers", default=None, help="write answers JSON here (single challenge)")
     ap.add_argument("--keep", action="store_true", help="keep work dirs")
