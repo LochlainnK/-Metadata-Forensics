@@ -24,9 +24,23 @@ install_deps() {
     msitools \
     unzip poppler-utils imagemagick jq curl
   echo "== installing python deps =="
-  python3 -m pip install -q --user dnfile LnkParse3 || python3 -m pip install -q dnfile LnkParse3
+  # IMPORTANT: the toolkit runs the solver as `python3 -I` (isolated mode) so it
+  # never imports code from the untrusted artifact tree. `-I` also disables the
+  # per-user site (`~/.local/...`), so a `--user` install would be invisible at
+  # solve time and dnfile/LnkParse3 fields would silently return null. Install
+  # into the global site that `-I` *does* search, so `python3 -I` can import them.
+  SITE="$(python3 -I - <<'PY'
+import sys
+# first global dist/site-packages on the isolated path
+print(next(p for p in sys.path if p.endswith(('dist-packages', 'site-packages'))))
+PY
+)"
+  python3 -m pip install -q --break-system-packages --target "$SITE" --upgrade dnfile LnkParse3 \
+    || python3 -m pip install -q --target "$SITE" --upgrade dnfile LnkParse3
   echo "== versions =="
-  exiftool -ver; msiinfo --version | head -1; python3 -c 'import dnfile;print("dnfile",dnfile.__version__)'
+  exiftool -ver; msiinfo --version | head -1
+  # verify under the SAME isolated mode the solver uses, not a plain interpreter
+  python3 -I -c 'import dnfile, LnkParse3; print("dnfile", dnfile.__version__, "+ LnkParse3 importable under -I")'
 }
 
 create_auth() {
