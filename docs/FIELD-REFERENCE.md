@@ -47,6 +47,43 @@ Reading the structure is the point.
 | `msi.product_code_guid` | `{8-4-4-4-12}` (as stored) | `msiinfo export <f> Property` → `ProductCode` row |
 | `lnk.target_path_windows` | the Windows target path, e.g. `C:\Windows\System32\cmd.exe` | `LnkParse3` → LinkInfo `local_base_path` + `common_path_suffix`; falls back to network share / env-var / relative-path blocks (day 14) |
 
+### Day 15–29 fields (see `bin/fmtprobe_ext.py`)
+
+| Field | Output | Source |
+|-------|--------|--------|
+| `ooxml.external_relationship_targets` (15) | compact JSON array, **sorted ascending** | all `*.rels` in the OOXML zip, `TargetMode="External"` targets |
+| `email.message_id` (16) | the `Message-ID` header incl. `<>` | stdlib `email` |
+| `media.primary_audio_codec_name` (17) | ffprobe `codec_name` of audio:0 (e.g. `pcm_s16le`) | `ffprobe` |
+| `media.primary_video_dimensions` (18) | `WxH` of video:0 | `ffprobe` |
+| `elf.e_machine_u16_hex` (19) | `0xNNNN` (u16, 4 digits) | ELF `e_machine` @ +18, endian per EI_DATA |
+| `macho.cpu_type_set` (20) | JSON array of `0x%08x` cputypes, **sorted ascending** | Mach-O thin or fat/universal header(s) |
+| `apk.package_name` (21) | the `package` attribute | binary AXML parser over `AndroidManifest.xml` |
+| `jar.main_class` (22) | `Main-Class` value | `META-INF/MANIFEST.MF` (handles line folding) |
+| `sqlite.page_size_bytes` (23) | integer (1 → 65536) | SQLite header u16 @ +16 (big-endian) |
+| `evtx.record_count` (24) | integer | EVTX file header `NextRecordIdentifier` − 1 |
+| `registry.hive_root_name` (25) | root key name | regf root cell offset @ +0x24 → `nk` record name |
+| `prefetch.executable_name` (26) | e.g. `CMD.EXE` | MAM/LZXPRESS-Huffman decompress (`dissect.util`) → SCCA name @ +0x10 |
+| `pcap.packet_count` (27) | integer | classic pcap record walk, or pcapng EPB/SPB block count |
+| `disk.partition_start_lba_sequence` (28) | JSON array of start LBAs | GPT partition entries (or classic MBR) |
+| `x509.sha256_fingerprint` (29) | 64 hex (lowercase) | SHA-256 of the certificate DER (PEM decoded if needed) |
+
+### Capstone question types (days 16+ time_trial/mastery)
+
+Days 16+ bundle **every prior field** across 5 evidence sets, plus two synthesis
+questions handled in `solve.py`:
+- **"exact filename of the \<thing\>"** — resolved by matching the keyword's
+  content words against member basenames (sibling-referenced members first, then
+  the zip's own members); `first` breaks ties toward central-directory order.
+- **"Compute the \<algo\> digest of each named file … ascending digest order"** —
+  each listed file is resolved *within its own set's zip* (basenames repeat
+  across sets), hashed, and the filenames returned as a compact JSON array.
+
+> Grader quirks confirmed live: GUID/number hex fields are width-padded
+> (`pe.address_of_entry_point_rva_hex` is a zero-padded u32, `0x00065bd0`);
+> list fields (`zip.central_directory_member_names`, `macho.cpu_type_set`,
+> `ooxml.external_relationship_targets`) are expected **sorted ascending**;
+> capstone submissions are all-or-nothing (any wrong answer ⇒ `incorrect`).
+
 ### GUID format notes
 
 - **MVID** (`.NET`): `dnfile` gives 16 raw bytes; a System.Guid serializes its

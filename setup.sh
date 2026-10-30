@@ -22,9 +22,13 @@ install_deps() {
     xxd \
     mediainfo \
     msitools \
+    ffmpeg \
+    openssl \
     unzip poppler-utils imagemagick jq curl
   echo "== installing python deps =="
-  python3 -m pip install -q --user dnfile LnkParse3 || python3 -m pip install -q dnfile LnkParse3
+  # dnfile(.NET), LnkParse3(.lnk), dissect.util(Win10 prefetch LZXPRESS)
+  PKGS="dnfile LnkParse3 dissect.util"
+  python3 -m pip install -q --user $PKGS || python3 -m pip install -q $PKGS
   echo "== versions =="
   exiftool -ver; msiinfo --version | head -1; python3 -c 'import dnfile;print("dnfile",dnfile.__version__)'
 }

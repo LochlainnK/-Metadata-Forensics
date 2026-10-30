@@ -28,6 +28,26 @@ column is the number of questions in the mastery bundle. Every one of these
 | 12 | Managed Expectations | .NET assemblies: rebuilds vs. renames | `dotnet.mvid_guid` | 2 |
 | 13 | Product Placement | MSI installers: revisions vs. collisions | `msi.product_code_guid` | 2 |
 | 14 | The Shortcut Home | Windows `.lnk` shortcuts: read where each points | `lnk.target_path_windows` | 2 |
+| 15 | Word to the Wise | OOXML external relationships (docx) | `ooxml.external_relationship_targets` | — |
+| 16 | Return to Sender | email headers + **capstone** (all prior fields) | `email.message_id` + synthesis | 105 |
+| 17 | Hear Me Out | audio codec (ffprobe) | `media.primary_audio_codec_name` | 110 |
+| 18 | Frame of Reference | video dimensions (ffprobe) | `media.primary_video_dimensions` | 115 |
+| 19 | Little Endian on the Prairie | ELF machine type | `elf.e_machine_u16_hex` | 120 |
+| 20 | Universal Appeal | Mach-O universal binary CPU types | `macho.cpu_type_set` | 125 |
+| 21 | Package Deal | APK package name (binary AXML) | `apk.package_name` | 130 |
+| 22 | Main Character Energy | JAR Main-Class | `jar.main_class` | 162 |
+| 23 | Page Me Maybe | SQLite page size | `sqlite.page_size_bytes` | 196 |
+| 24 | Event Horizon | EVTX record count | `evtx.record_count` | 232 |
+| 25 | Hive Mind | registry hive root key | `registry.hive_root_name` | 270 |
+| 26 | Before You Go | Windows Prefetch exe name (LZXPRESS) | `prefetch.executable_name` | 310 |
+| 27 | Packet Loss Prevention | pcap/pcapng packet count | `pcap.packet_count` | 352 |
+| 28 | Where It All Began | disk image GPT/MBR partition LBAs | `disk.partition_start_lba_sequence` | 396 |
+| 29 | Trust Issues | X.509 certificate SHA-256 fingerprint | `x509.sha256_fingerprint` | 442 |
+
+From day 16 the `time_trial`/`mastery` modes are **cumulative capstones**: one
+`evidence.zip` (mastery: 5 sets) carrying every field type seen so far, plus a
+"filename of the \<thing\>" and a "sort files by digest" synthesis question. They
+grade all-or-nothing. All 45 modes of days 15–29 are solved by this workflow.
 
 ## Recurring artifact shape
 

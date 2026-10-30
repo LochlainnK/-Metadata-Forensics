@@ -89,7 +89,8 @@ def extract_tree(artifacts_dir, index, extracted_bytes):
                 r = subprocess.run(["unzip", "-o", "-q", zpath, "-d", dest],
                                    capture_output=True)
                 if r.returncode not in (0, 1):  # 1 = warnings only
-                    sys.stderr.write(f"warn: unzip {fn}: {r.stderr.decode('replace')}\n")
+                    sys.stderr.write(
+                        f"warn: unzip {fn}: {r.stderr.decode('utf-8', 'replace')}\n")
                 index.setdefault(fn, dest)
                 for dd, _s, ff in os.walk(dest):
                     for x in ff:
@@ -139,6 +140,10 @@ GENERIC = [
     (re.compile(r"first sixteen bytes", re.I), "first16"),
 ]
 DETERMINE = re.compile(r"Determine\s+([a-z0-9_.]+)\s+for\s+", re.I)
+DIGESTSORT = re.compile(
+    r"Compute the full-file\s+(SHA-?256|SHA-?1|MD5)\s+digest.*?"
+    r"(ascending|descending)\s+digest order\.\s*Files:\s*(\[.*\])", re.I | re.S)
+FILENAME_Q = re.compile(r"exact filename of (?:the )?(.+?)\s*[?.]", re.I)
 
 
 def parse_field(question):
@@ -203,42 +208,66 @@ def zip_members_in_order(zip_path):
     return out
 
 
-def _is_note(name):
-    n = name.lower()
-    return n.endswith(".txt") or "note" in n
+_FN_STOP = {"the", "a", "an", "exact", "filename", "file", "of", "named", "its"}
 
+def _tokens(s):
+    return [t for t in re.split(r"[^a-z0-9]+", s.lower()) if t]
 
-def resolve_filename(kind, zip_name, sibling_members, artifacts_dir):
-    """Resolve a filename-reasoning question deterministically.
+def resolve_filename(keyword, zip_name, sibling_members, artifacts_dir):
+    """Resolve 'exact filename of the <keyword>' by matching the keyword's
+    content words against candidate member basenames.
 
-    Primary signal: sibling questions in the same set reference the exact
-    member via their '<zip> -> <member>' artifact, so the note member named
-    there is the answer. Fallback: the zip's direct members in
-    central-directory order.
+    Candidates are the sibling questions' referenced members (they name the
+    exact files under test), falling back to the archive's direct members in
+    central-directory order. Scoring: most keyword tokens matched, then fewest
+    extra tokens; 'first' breaks ties toward central-directory order.
     """
-    # 1. sibling-derived (deterministic)
-    sib_notes = [m for m in sibling_members if _is_note(m)]
-    if len(set(sib_notes)) == 1:
-        return os.path.basename(sib_notes[0]), ""        # confident
-    if sib_notes:
-        return os.path.basename(sib_notes[0]), "review(multiple-notes)"
+    kw = {t for t in _tokens(keyword) if t not in _FN_STOP}
+    want_first = "first" in _tokens(keyword)
 
-    # 2. fall back to reading the archive's direct members
+    # candidates: sibling-referenced members first, then the zip's own direct
+    # members (the target may have no sibling question, e.g. the roster file).
+    cands = [os.path.basename(m) for m in sibling_members]
     zpath = find_file(artifacts_dir, os.path.basename(zip_name))
-    if not zpath:
-        return None, "review(zip-not-found)"
-    members = zip_members_in_order(zpath)
-    notes = [(n, d) for n, d in members if _is_note(n)]
-    if kind == "renamed-copy":
-        by_hash = {}
-        for n, d in members:
-            by_hash.setdefault(hashlib.sha256(d).hexdigest(), []).append(n)
-        dupes = [v for v in by_hash.values() if len(v) > 1]
-        if dupes:
-            return os.path.basename(dupes[0][-1]), "review"
-    if notes:
-        return os.path.basename(notes[0][0]), "review"
-    return None, "review(no-note)"
+    if zpath:
+        cands += [os.path.basename(n) for n, _ in zip_members_in_order(zpath)]
+    cands = list(dict.fromkeys(cands))
+    scored = []
+    for i, c in enumerate(cands):
+        ct = set(_tokens(c))
+        inter = len(kw & ct)
+        if inter:
+            scored.append(((inter, -len(ct - kw), -i if want_first else 0), c))
+    if scored:
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = scored[0][0][0]
+        tie = [c for s, c in scored if s[0] == top]
+        return tie[0], ("" if len(tie) == 1 or want_first else "review(ambiguous)")
+    return (cands[0], "review(no-keyword-match)") if cands else (None, "review(empty)")
+
+
+_HASH = {"sha256": hashlib.sha256, "sha1": hashlib.sha1, "md5": hashlib.md5}
+
+def resolve_digestsort(algo, order, files, index, zip_name, delivery, artifacts_dir):
+    """Sort a named file list by their digest and return a compact JSON array
+    of the filenames in that order (the 'ascending digest order' questions).
+
+    Each file is resolved WITHIN the question's own set/zip, since a multi-set
+    mastery repeats basenames (set1/roster.csv vs set2/roster.csv) with
+    different content.
+    """
+    h = _HASH.get(algo)
+    if not h:
+        return None, f"digestsort-algo({algo})"
+    scored = []
+    for fn in files:
+        p = resolve_member(index, zip_name, fn, artifacts_dir, delivery)
+        if not p:
+            return None, f"digestsort-missing({fn})"
+        with open(p, "rb") as fh:
+            scored.append((h(fh.read()).hexdigest(), fn))
+    scored.sort(key=lambda x: x[0], reverse=(order == "descending"))
+    return json.dumps([fn for _, fn in scored], separators=(",", ":")), ""
 
 
 # ---------------------------------------------------------------- solve one ----
@@ -316,14 +345,33 @@ def solve_one(challenge, a):
     for idx, q in enumerate(questions):
         qid = q.get("id")
         field, special = parse_field(q.get("question", ""))
+        qtext = q.get("question", "")
         zip_name, member, delivery = parse_artifact(q.get("artifact", ""))
+
+        # compound: sort a named file list by digest (capstone question)
+        dm = DIGESTSORT.search(qtext)
+        if dm:
+            algo = dm.group(1).lower().replace("-", "")
+            order = dm.group(2).lower()
+            try:
+                files = json.loads(dm.group(3))
+            except Exception:
+                files = []
+            jobs.append((idx, qid, f"digest-sort[{algo}]", f"{len(files)} files",
+                         "digestsort", (algo, order, files, zip_name, delivery)))
+            continue
+        # any "exact filename of the <keyword>" question
+        fm = FILENAME_Q.search(qtext)
+        if fm:
+            sibs = group_members.get(group_key(q, zip_name), [])
+            jobs.append((idx, qid, f"filename:{fm.group(1).strip()[:18]}", zip_name,
+                         "filename", (fm.group(1).strip(), zip_name, sibs)))
+            continue
+
+        field, special = parse_field(qtext)
         label = field or special or "?"
         tgt = member or zip_name
-        if special in ("first-note", "renamed-copy", "filename-other"):
-            sibs = group_members.get(group_key(q, zip_name), [])
-            jobs.append((idx, qid, label, tgt, "filename",
-                         (special, zip_name, sibs)))
-        elif field is None:
+        if field is None:
             jobs.append((idx, qid, label, tgt, "unmapped", None))
         else:
             path = resolve_member(index, zip_name, member, artifacts_dir, delivery) if member \
@@ -348,8 +396,12 @@ def solve_one(challenge, a):
         val, note = None, ""
         try:
             if kind == "filename":
-                special, zip_name, sibs = payload
-                val, note = resolve_filename(special, zip_name, sibs, artifacts_dir)
+                keyword, zip_name, sibs = payload
+                val, note = resolve_filename(keyword, zip_name, sibs, artifacts_dir)
+            elif kind == "digestsort":
+                algo, order, files, zip_name, delivery = payload
+                val, note = resolve_digestsort(algo, order, files, index,
+                                               zip_name, delivery, artifacts_dir)
             elif kind == "unmapped":
                 note = "UNMAPPED-QUESTION"
             elif kind == "notfound":

@@ -5,8 +5,12 @@ Huntress CTF 2026. It talks to the Game Master API, downloads the assigned
 artifacts, reads their *real bytes*, and answers each question in exactly the
 format the grader expects — fast enough for Time Trial and Mastery modes.
 
-Validated end-to-end against **all 169 questions across the 13 released
-mastery challenges (days 1–13): 169/169 auto-answered, 0 unresolved.**
+Validated end-to-end against the **entire released lane, days 1–29, all three
+modes (single_solve, time_trial, mastery) — every challenge solved.** The day-16+
+capstones bundle every prior field across five evidence sets (up to 442
+questions each) and grade all-or-nothing; `fmtprobe_ext.py` adds parsers for
+OOXML, email, media (ffprobe), ELF, Mach-O, APK, JAR, SQLite, EVTX, registry,
+Prefetch, pcap, disk/GPT and X.509.
 
 ```
 bin/
