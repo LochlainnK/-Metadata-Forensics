@@ -9,7 +9,7 @@ dispatch table; solve.py then routes questions here automatically.
 Kept separate from fmtprobe.py's hand-verified core so the growing catalogue of
 one-off container formats stays readable.
 """
-import struct, json, hashlib, subprocess, base64, re, zipfile, email
+import os, struct, json, hashlib, subprocess, base64, re, zipfile, email
 
 
 # ---- email (day 16) --------------------------------------------------------
@@ -149,6 +149,46 @@ def x509_sha256_fingerprint(path):
     else:
         der = data   # already DER
     return hashlib.sha256(der).hexdigest()
+
+
+# ---- identical-content groups within a cluster (day 30) --------------------
+def relation_identical_sha256_groups(path):
+    """Group a cluster zip's manifest artifacts by identical content.
+
+    Reads delivery-manifest.json, hashes each artifact's actual bytes (so a
+    manifest that lies about a digest can't fool the grouping), and returns a
+    compact JSON array of the duplicate groups: each group is the artifact ids
+    sorted ascending, and groups appear in manifest (first-occurrence) order.
+    """
+    from collections import OrderedDict
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+            man = None
+            if "delivery-manifest.json" in names:
+                try:
+                    man = json.loads(z.read("delivery-manifest.json"))
+                except Exception:
+                    man = None
+            groups = OrderedDict()
+            if man:                       # manifest defines the artifact ids
+                for a in man["artifacts"]:
+                    member = a.get("path") or a.get("filename")
+                    h = hashlib.sha256(z.read(member)).hexdigest()
+                    groups.setdefault(h, []).append(a["id"])
+            else:                         # no manifest: id = member basename (no ext)
+                for i in z.infolist():
+                    if i.is_dir() or os.path.basename(i.filename) == "delivery-manifest.json":
+                        continue
+                    h = hashlib.sha256(z.read(i)).hexdigest()
+                    idv = os.path.splitext(os.path.basename(i.filename))[0]
+                    groups.setdefault(h, []).append(idv)
+    except Exception:
+        return None
+    # duplicate groups only; ids sorted within a group, groups by their first id
+    dup = sorted((sorted(ids) for ids in groups.values() if len(ids) > 1),
+                 key=lambda g: g[0])
+    return json.dumps(dup, separators=(",", ":"))
 
 
 # ---- OOXML external relationships (day 15) ---------------------------------
@@ -309,6 +349,7 @@ def registry_hive_root_name(path):
 
 
 EXT_PATH_FIELDS = {
+    "relation.identical_sha256_groups": relation_identical_sha256_groups,
     "ooxml.external_relationship_targets": ooxml_external_relationship_targets,
     "apk.package_name": apk_package_name,
     "prefetch.executable_name": prefetch_executable_name,

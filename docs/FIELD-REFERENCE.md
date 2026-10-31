@@ -67,6 +67,8 @@ Reading the structure is the point.
 | `disk.partition_start_lba_sequence` (28) | JSON array of start LBAs | GPT partition entries (or classic MBR) |
 | `x509.sha256_fingerprint` (29) | 64 hex (lowercase) | SHA-256 of the certificate DER (PEM decoded if needed) |
 
+| `relation.identical_sha256_groups` (30) | JSON array of duplicate groups; ids sorted within a group, groups by first id | hash each cluster member by actual bytes; id from `delivery-manifest.json` or member basename when no manifest |
+
 ### Capstone question types (days 16+ time_trial/mastery)
 
 Days 16+ bundle **every prior field** across 5 evidence sets, plus two synthesis
