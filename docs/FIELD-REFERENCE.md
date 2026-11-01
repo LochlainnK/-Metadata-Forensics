@@ -67,6 +67,7 @@ Reading the structure is the point.
 | `disk.partition_start_lba_sequence` (28) | JSON array of start LBAs | GPT partition entries (or classic MBR) |
 | `x509.sha256_fingerprint` (29) | 64 hex (lowercase) | SHA-256 of the certificate DER (PEM decoded if needed) |
 
+| `graph.execution_chain_artifact_ids` (31) | JSON array of ids along the chain from the in-degree-0 start to a terminal | edges parsed from each artifact's metadata (script Invoke/Start, PNG `next=`, zip `run.txt`, SQLite cell, JSON `next`, decoded e-mail route); the metadata-unsupported cycle is excluded |
 | `relation.identical_sha256_groups` (30) | JSON array of duplicate groups; ids sorted within a group, groups by first id | hash each cluster member by actual bytes; id from `delivery-manifest.json` or member basename when no manifest |
 
 ### Capstone question types (days 16+ time_trial/mastery)

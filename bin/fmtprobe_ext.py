@@ -151,6 +151,79 @@ def x509_sha256_fingerprint(path):
     return hashlib.sha256(der).hexdigest()
 
 
+# ---- execution/delivery chain reconstruction (day 31) ----------------------
+_EDGE_RX = re.compile(
+    r"(?:next\s*=\s*|execute\s+|run\s+|forwarded\s*to\s*:?\s*|open\s*:?\s*|"
+    r"target\s*:?\s*|Invoke-Item\s*|Start-Process\s*|&\s*)['\"]?[.\\/]*"
+    r"([a-z]+-[0-9a-f]{4,})", re.I)
+_DONE_RX = re.compile(r"\b(done|complete|final|terminal|end)\b", re.I)
+
+def _artifact_text(name, b):
+    """Searchable 'primary metadata' text for one artifact: raw bytes (PNG tEXt,
+    SQLite values and scripts are plaintext) plus decoded zip run notes and
+    decoded base64 e-mail route notes."""
+    parts = [b.decode("latin-1", "replace")]
+    if b[:4] == b"PK\x03\x04":                      # zip: decompress members
+        try:
+            import io
+            with zipfile.ZipFile(io.BytesIO(b)) as iz:
+                for x in iz.namelist():
+                    if not x.endswith("/"):
+                        parts.append(iz.read(x).decode("latin-1", "replace"))
+        except Exception:
+            pass
+    if b[:5] == b"From:" or b"Message-ID" in b[:400]:   # email: decode parts
+        try:
+            msg = email.message_from_bytes(b)
+            for p in msg.walk():
+                pay = p.get_payload(decode=True)
+                if pay:
+                    parts.append(pay.decode("latin-1", "replace"))
+        except Exception:
+            pass
+    return "\n".join(parts)
+
+def graph_execution_chain_artifact_ids(path):
+    try:
+        with zipfile.ZipFile(path) as z:
+            members = [n for n in z.namelist() if not n.endswith("/")]
+            data = {os.path.basename(n): z.read(n) for n in members}
+    except Exception:
+        return None
+    ids = set(data)
+    edge = {}                       # id -> next id, or None for a terminal
+    for sid, b in data.items():
+        text = _artifact_text(sid, b)
+        # an edge is a full artifact id referenced in this artifact's primary
+        # metadata (scripts, PNG tEXt, SQLite cells, JSON, decoded e-mail/zip).
+        # Prefer a keyword-prefixed reference; else the single id that appears.
+        # Decoy notes cite bare words without the hex suffix, so they match no id.
+        nxt = None
+        for m in _EDGE_RX.finditer(text):
+            if m.group(1) in ids and m.group(1) != sid:
+                nxt = m.group(1)
+                break
+        if nxt is None:
+            present = [i for i in ids if i != sid and i in text]
+            if len(set(present)) == 1:
+                nxt = present[0]
+        edge[sid] = nxt
+    # the execution chain starts at an id nothing points to and ends at a
+    # terminal; a pure cycle (the unsupported "tempting conclusion") has no
+    # such start, so it is excluded.
+    targets = {v for v in edge.values() if v}
+    starts = [i for i in edge if i not in targets]
+    for s in sorted(starts):
+        seq, cur, seen = [], s, set()
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            seq.append(cur)
+            cur = edge.get(cur)
+        if cur is None:             # reached a terminal cleanly
+            return json.dumps(seq, separators=(",", ":"))
+    return json.dumps([], separators=(",", ":"))
+
+
 # ---- identical-content groups within a cluster (day 30) --------------------
 def relation_identical_sha256_groups(path):
     """Group a cluster zip's manifest artifacts by identical content.
@@ -349,6 +422,7 @@ def registry_hive_root_name(path):
 
 
 EXT_PATH_FIELDS = {
+    "graph.execution_chain_artifact_ids": graph_execution_chain_artifact_ids,
     "relation.identical_sha256_groups": relation_identical_sha256_groups,
     "ooxml.external_relationship_targets": ooxml_external_relationship_targets,
     "apk.package_name": apk_package_name,

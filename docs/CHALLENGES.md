@@ -44,6 +44,7 @@ column is the number of questions in the mastery bundle. Every one of these
 | 28 | Where It All Began | disk image GPT/MBR partition LBAs | `disk.partition_start_lba_sequence` | 396 |
 | 29 | Trust Issues | X.509 certificate SHA-256 fingerprint | `x509.sha256_fingerprint` | 442 |
 | 30 | Seeing Double | cluster of files: group identical content by SHA-256 | `relation.identical_sha256_groups` | 490 |
+| 31 | No Artifact Left Behind | reconstruct the execution/delivery chain from cross-artifact metadata; reject the decoy cycle | `graph.execution_chain_artifact_ids` | 540 |
 
 From day 16 the `time_trial`/`mastery` modes are **cumulative capstones**: one
 `evidence.zip` (mastery: 5 sets) carrying every field type seen so far, plus a
